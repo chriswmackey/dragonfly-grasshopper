@@ -31,10 +31,10 @@ Create a REopt ground-mounted photovoltaic system from its footprint geometry
 
 ghenv.Component.Name = 'DF Ground Photovoltaics'
 ghenv.Component.NickName = 'GroundPV'
-ghenv.Component.Message = '1.10.0'
+ghenv.Component.Message = '1.10.1'
 ghenv.Component.Category = 'Dragonfly'
-ghenv.Component.SubCategory = '3 :: Energy'
-ghenv.Component.AdditionalHelpFromDocStrings = '4'
+ghenv.Component.SubCategory = '4 :: Electric Grid'
+ghenv.Component.AdditionalHelpFromDocStrings = '5'
 
 try:  # import the core honeybee dependencies
     from honeybee.typing import clean_ep_string
