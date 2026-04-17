@@ -33,9 +33,13 @@ or Room2Ds.
                 * HeatPump_WaterHeater - 3.5
                 * Gas_TanklessHeater - 0.8
                 * Electric_TanklessHeater - 1.0
+                * District_WaterHeater - 1.0
+                * District_TanklessHeater - 1.0
         _condition_: A number for the ambient temperature in which the hot water tank
             is located [C]. This can also be a Room2D in which the tank is
-            located. (Default: 22).
+            located. (Default: 22, unless the _system_type is HeatPump_WaterHeater
+            and the input _df_objs are Buildings or a Model, in which case the
+            tank is placed in the largest room on the first floor of the Building).
         _loss_coeff_: A number for the loss of heat from the water heater tank to the
             surrounding ambient conditions [W/K]. (Default: 6 W/K).
 
@@ -45,7 +49,7 @@ or Room2Ds.
 
 ghenv.Component.Name = "DF SHW System"
 ghenv.Component.NickName = 'SHW'
-ghenv.Component.Message = '1.10.0'
+ghenv.Component.Message = '1.10.1'
 ghenv.Component.Category = 'Dragonfly'
 ghenv.Component.SubCategory = '3 :: Energy'
 ghenv.Component.AdditionalHelpFromDocStrings = '3'
@@ -79,6 +83,15 @@ except ImportError as e:
     raise ImportError('\nFailed to import ladybug_rhino:\n\t{}'.format(e))
 
 
+def best_room_for_heater(building):
+    """Get the ID of the Room2D that is best suited for a water heater in a Building."""
+    try:
+        lowest_floor = building.unique_stories[0]
+    except IndexError:  # Building of 3D rooms
+        return sorted(building.room_3ds, key=lambda x: x.floor_area)[-1].identifier
+    return sorted(lowest_floor.room_2ds, key=lambda x: x.floor_area)[-1].identifier
+
+
 if all_required_inputs(ghenv.Component):
     # duplicate the initial objects
     df_objs = [obj.duplicate() for obj in _df_objs]
@@ -86,8 +99,19 @@ if all_required_inputs(ghenv.Component):
     # set default value for the inputs
     name = clean_and_id_ep_string('SHW System') if _name_ is None \
         else clean_ep_string(_name_)
+    _loss_coeff_ = 6 if _loss_coeff_ is None else _loss_coeff_
     if _condition_ is None:
-        _condition_ = 22
+        if _system_type == 'HeatPump_WaterHeater' and \
+                all(isinstance(dfo, (Building, Model)) for dfo in df_objs):
+            _condition_ = []
+            for obj in df_objs:
+                if isinstance(obj, Building):
+                    _condition_.append(best_room_for_heater(obj))
+                else:
+                    for bldg in obj.buildings:
+                        _condition_.append(best_room_for_heater(bldg))
+        else:
+            _condition_ = 22
     elif isinstance(_condition_, Room2D):
         _condition_ = _condition_.identifier
     else:
@@ -99,22 +123,34 @@ if all_required_inputs(ghenv.Component):
                 'or a number\nfor the ambient temperature in which the hot water '
                 'tank is located [C].\nGot {}.'.format(type(_condition_))
             )
-    _loss_coeff_ = 6 if _loss_coeff_ is None else _loss_coeff_
 
     # create the SHW System
-    shw = SHWSystem(name, _system_type, _efficiency_, _condition_, _loss_coeff_)
+    if isinstance(_condition_, list):
+        shw = [SHWSystem(name, _system_type, _efficiency_, con, _loss_coeff_)
+               for con in _condition_]
+    else:
+        shw = SHWSystem(name, _system_type, _efficiency_, _condition_, _loss_coeff_)
     if _name_ is not None:
         shw.display_name = _name_
 
     # apply the HVAC system to the objects
+    shw_count = 0
     for obj in df_objs:
         if isinstance(obj, (Building, Story)):
-            obj.properties.energy.set_all_room_2d_shw(shw)
+            if isinstance(shw, list):
+                obj.properties.energy.set_all_room_2d_shw(shw[shw_count])
+                shw_count += 1
+            else:
+                obj.properties.energy.set_all_room_2d_shw(shw)
         elif isinstance(obj, Room2D) and obj.properties.energy.is_conditioned:
             obj.properties.energy.shw = shw
         elif isinstance(obj, Model):
             for bldg in obj.buildings:
-                bldg.properties.energy.set_all_room_2d_shw(shw)
+                if isinstance(shw, list):
+                    bldg.properties.energy.set_all_room_2d_shw(shw[shw_count])
+                    shw_count += 1
+                else:
+                    bldg.properties.energy.set_all_room_2d_shw(shw)
         else:
             raise ValueError(
                 'Expected Dragonfly Room2D, Story, Building, or Model. '
